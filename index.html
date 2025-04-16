@@ -1,82 +1,119 @@
-<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html><html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>Flight Tracker</title>
-    <style>
-        body { font-family: sans-serif; margin: 2em; }
-        input, button { padding: 0.5em; margin-right: 0.5em; }
-        ul { list-style: none; padding: 0; }
-        li { margin-bottom: 0.5em; }
-        .flight { display: flex; justify-content: space-between; align-items: center; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Отслеживание рейсов</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+      max-width: 600px;
+      margin: auto;
+    }
+    h1 { text-align: center; }
+    input, button {
+      padding: 10px;
+      font-size: 1rem;
+      margin: 5px 0;
+      width: 100%;
+    }
+    .flight-card {
+      background: white;
+      padding: 15px;
+      margin-top: 15px;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .log {
+      font-size: 0.9rem;
+      color: #555;
+      margin-top: 10px;
+    }
+  </style>
 </head>
 <body>
-    <h1>Flight Tracker</h1>
-    <input id="flightNumber" placeholder="Enter flight number">
-    <button onclick="trackFlight()">Track</button>
-    <ul id="flightList"></ul>
+  <h1>Отслеживание рейсов</h1>
+  <input type="text" id="flightInput" placeholder="Введите IATA-код (например, SU100)" />
+  <button onclick="trackFlight()">Отследить</button>
+  <div id="flights"></div>  <script>
+    const apiKey = "dc986e9f34b319beb6f2cfe573e73bbb";
+    const trackedFlights = {};
 
-    <script>
-        const apiKey = "dc986e9f34b319beb6f2cfe573e73bbb";
-        const baseUrl = "https://api.flightapi.com/status";
-        let flights = JSON.parse(localStorage.getItem("flights") || "[]");
+    async function getFlightStatus(iataCode) {
+      try {
+        const res = await fetch(`http://api.aviationstack.com/v1/flights?access_key=${apiKey}&flight_iata=${iataCode}`);
+        const data = await res.json();
+        if (!data.data || data.data.length === 0) return null;
+        return data.data[0];
+      } catch (e) {
+        return "error";
+      }
+    }
 
-        function saveFlights() {
-            localStorage.setItem("flights", JSON.stringify(flights));
-        }
+    function notify(message) {
+      if (Notification.permission === "granted") {
+        new Notification(message);
+      }
+    }
 
-        function trackFlight() {
-            const flightNumber = document.getElementById("flightNumber").value.trim();
-            if (flightNumber && !flights.includes(flightNumber)) {
-                flights.push(flightNumber);
-                saveFlights();
-                updateFlightList();
-            }
-        }
+    async function trackFlight() {
+      const code = document.getElementById("flightInput").value.trim().toUpperCase();
+      if (!code || trackedFlights[code]) return;
 
-        function removeFlight(flight) {
-            flights = flights.filter(f => f !== flight);
-            saveFlights();
-            updateFlightList();
-        }
+      const container = document.createElement("div");
+      container.className = "flight-card";
+      container.id = `flight-${code}`;
+      container.innerHTML = `<strong>${code}</strong><br>Загрузка...`;
+      document.getElementById("flights").appendChild(container);
 
-        function updateFlightList() {
-            const list = document.getElementById("flightList");
-            list.innerHTML = '';
-            flights.forEach(flight => {
-                const li = document.createElement("li");
-                li.className = "flight";
-                li.innerHTML = `
-                    <span>Tracking ${flight}</span>
-                    <button onclick="removeFlight('${flight}')">Remove</button>
-                `;
-                list.appendChild(li);
-            });
-        }
+      trackedFlights[code] = { lastStatus: null };
+      updateFlight(code);
+      setInterval(() => updateFlight(code), 10 * 60 * 1000); // каждые 10 минут
+    }
 
-        async function checkStatuses() {
-            for (const flight of flights) {
-                try {
-                    const res = await fetch(`${baseUrl}?flight_number=${flight}&api_key=${apiKey}`);
-                    const data = await res.json();
-                    const status = data.status || "Unknown";
+    async function updateFlight(code) {
+      const data = await getFlightStatus(code);
+      const div = document.getElementById(`flight-${code}`);
 
-                    if (Notification.permission === "granted") {
-                        new Notification(`Flight ${flight}`, { body: `Status: ${status}` });
-                    }
-                } catch (e) {
-                    console.error(`Ошибка: ${e}`);
-                }
-            }
-        }
+      if (data === "error") {
+        div.innerHTML += `<div class="log">Ошибка загрузки данных</div>`;
+        return;
+      }
+      if (!data) {
+        div.innerHTML += `<div class="log">Нет данных по рейсу</div>`;
+        return;
+      }
 
-        if (Notification.permission !== "granted") {
-            Notification.requestPermission();
-        }
+      const status = data.flight_status;
+      const departure = data.departure;
+      const arrival = data.arrival;
 
-        setInterval(checkStatuses, 60000); // Каждую минуту
-        updateFlightList();
-    </script>
-</body>
+      const text = `
+        <strong>${data.airline.name} ${data.flight.iata}</strong><br>
+        Статус: <strong>${status}</strong><br>
+        Откуда: ${departure.airport} (${departure.iata})<br>
+        Куда: ${arrival.airport} (${arrival.iata})<br>
+        Время вылета: ${departure.scheduled || "?"}<br>
+        Время прибытия: ${arrival.scheduled || "?"}<br>
+        Терминал: ${departure.terminal || "?"}, Гейт: ${departure.gate || "?"}
+      `;
+
+      div.innerHTML = text;
+
+      if (trackedFlights[code].lastStatus && trackedFlights[code].lastStatus !== status) {
+        notify(`Рейс ${code} обновил статус: ${status}`);
+        div.innerHTML += `<div class="log">Статус обновлён: ${status}</div>`;
+      } else if (!trackedFlights[code].lastStatus) {
+        div.innerHTML += `<div class="log">Рейс добавлен</div>`;
+      }
+      trackedFlights[code].lastStatus = status;
+    }
+
+    // Разрешение на уведомления
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+  </script></body>
 </html>

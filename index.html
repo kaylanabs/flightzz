@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flight Tracker</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        input, button { padding: 0.5em; margin-right: 0.5em; }
+        ul { list-style: none; padding: 0; }
+        li { margin-bottom: 0.5em; }
+        .flight { display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+    <h1>Flight Tracker</h1>
+    <input id="flightNumber" placeholder="Enter flight number">
+    <button onclick="trackFlight()">Track</button>
+    <ul id="flightList"></ul>
+
+    <script>
+        const apiKey = "dc986e9f34b319beb6f2cfe573e73bbb";
+        const baseUrl = "https://api.flightapi.com/status";
+        let flights = JSON.parse(localStorage.getItem("flights") || "[]");
+
+        function saveFlights() {
+            localStorage.setItem("flights", JSON.stringify(flights));
+        }
+
+        function trackFlight() {
+            const flightNumber = document.getElementById("flightNumber").value.trim();
+            if (flightNumber && !flights.includes(flightNumber)) {
+                flights.push(flightNumber);
+                saveFlights();
+                updateFlightList();
+            }
+        }
+
+        function removeFlight(flight) {
+            flights = flights.filter(f => f !== flight);
+            saveFlights();
+            updateFlightList();
+        }
+
+        function updateFlightList() {
+            const list = document.getElementById("flightList");
+            list.innerHTML = '';
+            flights.forEach(flight => {
+                const li = document.createElement("li");
+                li.className = "flight";
+                li.innerHTML = `
+                    <span>Tracking ${flight}</span>
+                    <button onclick="removeFlight('${flight}')">Remove</button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        async function checkStatuses() {
+            for (const flight of flights) {
+                try {
+                    const res = await fetch(`${baseUrl}?flight_number=${flight}&api_key=${apiKey}`);
+                    const data = await res.json();
+                    const status = data.status || "Unknown";
+
+                    if (Notification.permission === "granted") {
+                        new Notification(`Flight ${flight}`, { body: `Status: ${status}` });
+                    }
+                } catch (e) {
+                    console.error(`Ошибка: ${e}`);
+                }
+            }
+        }
+
+        if (Notification.permission !== "granted") {
+            Notification.requestPermission();
+        }
+
+        setInterval(checkStatuses, 60000); // Каждую минуту
+        updateFlightList();
+    </script>
+</body>
+</html>
